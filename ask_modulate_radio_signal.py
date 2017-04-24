@@ -1,5 +1,7 @@
-import numpy as np
 import sys
+import json
+import argparse
+import numpy as np
 
 SAMPLE_BITSIZE = 16
 MAX_AMP_16BIT = int(2**SAMPLE_BITSIZE/2 - 1)
@@ -14,6 +16,7 @@ DEFAULT_AMP_MAP = {
     'LOW': MAX_AMP_16BIT * .02,
     'HIGH': MAX_AMP_16BIT
 }
+
 
 def get_modulation_array(binary_data, sample_rate, baud, sig_ratios, amp_map, dtype=np.int16):
     data_points_in_bit = int(sample_rate * 1/baud)
@@ -63,6 +66,7 @@ def generate_on_off_key_signal(binary_data, carrier_wave_freq, sample_rate,
     
     return t, carrier_wave * modulation_array * super_wave
 
+
 def generate_pulse(bit_val, carrier_wave_freq, sample_rate, baud, multiple_of_bit_len,
                    amp_map=DEFAULT_AMP_MAP, dtype=np.int16):
     signal_len_secs = multiple_of_bit_len * (1/baud)
@@ -72,33 +76,49 @@ def generate_pulse(bit_val, carrier_wave_freq, sample_rate, baud, multiple_of_bi
     pulse = amp_map[high_or_low] * np.e**(carrier_wave_freq * 2 * np.pi * (0+1j) * t)
     return t, pulse
 
+
 def join_all_arrays(array_list):
     joined = array_list[0]
     for a in array_list[1:]:
         joined = np.append(joined, a)
     return joined
 
+
 def write_pcm_file(signal_data, file_path, dtype='complex64'):
     np.array(signal_data).astype(dtype).tofile(file_path)
 
-on_signal  = '0110100010000000'
-off_signal = '0110100001000000'
 
-binary_data = off_signal
-carrier_wave_freq = 315e6
-sample_rate = 2e6
-baud = 205 * 2
-#out_path = 'raw_data/generated_outlet_on.pcm'
-out_path = 'raw_data/generated_outlet_off.pcm'
+def ask_modulate_radio_signal(bit_str, freq, baud, sample_rate, amp_map, repeat_times=12, header_len=4, header_value='1', space_len=4):
+    t, complex_signal = generate_on_off_key_signal(bit_str, freq, sample_rate, baud, amp_map=amp_map, dtype='complex64')
+    t2, signal_header = generate_pulse(header_value, freq, sample_rate, baud, header_len, amp_map=amp_map, dtype='complex64')
+    t3, signal_spacer = generate_pulse('0', freq, sample_rate, baud, space_len, amp_map=amp_map, dtype='complex64')
+    return join_all_arrays([signal_header] + ([complex_signal, signal_spacer] * repeat_times))
 
-complex64_amp_map = {
-    'LOW': 1.4 * .02,
-    'HIGH': 1.4
-}
 
-t, complex_signal = generate_on_off_key_signal(binary_data, carrier_wave_freq, sample_rate, baud, amp_map=complex64_amp_map, dtype='complex64')
-t2, signal_header = generate_pulse('1', carrier_wave_freq, sample_rate, baud, 3.85, amp_map=complex64_amp_map, dtype='complex64')
-t3, signal_spacer = generate_pulse('0', carrier_wave_freq, sample_rate, baud, 3.78, amp_map=complex64_amp_map, dtype='complex64')
+def parse_config_file(config_path):
+    """ Loads config file like this:
+    {'bit_str': '0110100000100000',
+     'freq': 315000000,
+     'baud': 410,
+     'sample_rate': 2000000,
+     'amp_map': {'LOW': 0.28, 'HIGH': 1.4},
+     'header_len': 3.85,
+     'space_len': 3.78
+    }
+    """
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
+    return config_dict
 
-full_signal = join_all_arrays([signal_header] + ([complex_signal, signal_spacer] * 12))
-write_pcm_file(full_signal, out_path, dtype='complex64')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--config', type=str, dest='config', required=True, help='Config file path')
+    parser.add_argument('-o', '--out', type=str, dest='outfile', required=True, help='Output file path')
+    args = parser.parse_args()
+
+    config = parse_config_file(args.config)
+
+    signal = ask_modulate_radio_signal(**config)
+    write_pcm_file(signal, args.outfile, dtype='complex64')
+
