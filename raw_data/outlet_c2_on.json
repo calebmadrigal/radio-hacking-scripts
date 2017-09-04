@@ -3,8 +3,6 @@
     "freq": 315000000,
     "baud": 410,
     "sample_rate": 2000000,
-    "header_len": 3.85,
-    "space_len": 3.78,
     "amp_map": {
         "LOW": 0.28,
         "HIGH": 1.4
